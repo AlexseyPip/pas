@@ -158,18 +158,18 @@ pas_zip_t *pas_zip_open(const void *data, size_t size, pas_zip_status *status) {
     return &pas_zip__handle;
 }
 
-static int parse_cd_entry(const uint8_t *p, size_t end, pas_zip_file_t *out) {
+static int parse_cd_entry(const uint8_t *p, const uint8_t *end, pas_zip_file_t *out) {
     uint16_t fn_len, extra_len, comment_len;
     size_t need;
 
-    if (p + 46 > (const uint8_t *)end) return 0;
+    if (p + 46 > end) return 0;
     if (read_u32_le(p) != PAS_ZIP_CDH_SIG) return 0;
 
     fn_len = read_u16_le(p + 28);
     extra_len = read_u16_le(p + 30);
     comment_len = read_u16_le(p + 32);
     need = 46 + fn_len + extra_len + comment_len;
-    if (p + need > (const uint8_t *)end) return 0;
+    if (p + need > end) return 0;
 
     out->compression_method = read_u16_le(p + 10);
     out->compressed_size = (size_t)read_u32_le(p + 20);
@@ -243,8 +243,11 @@ size_t pas_zip_extract(pas_zip_file_t *file, void *buffer, size_t buffer_size, p
     data = pas_zip__handle.data;
     data_size = pas_zip__handle.size;
 
-    payload_offset = skip_local_header(data, data_size, file->local_header_offset);
-    if (payload_offset == 0) return 0;
+    {
+        size_t hdr_len = skip_local_header(data, data_size, file->local_header_offset);
+        if (hdr_len == 0) return 0;
+        payload_offset = file->local_header_offset + hdr_len;
+    }
     if (payload_offset + file->compressed_size > data_size) return 0;
 
     if (buffer_size < file->uncompressed_size) {
@@ -315,13 +318,13 @@ size_t pas_zip_create(const char **filenames, const void **datas, const size_t *
         out[written++] = 0x50; out[written++] = 0x4b; out[written++] = 0x03; out[written++] = 0x04;
         out[written++] = 20; out[written++] = 0;  out[written++] = 0; out[written++] = 0;
         out[written++] = 0; out[written++] = 0;  /* store */
-        for (n = 0; n < 12; n++) out[written++] = 0;
+        for (n = 0; n < 8; n++) out[written++] = 0;  /* mod time, mod date, crc */
         out[written++] = (uint8_t)(sz); out[written++] = (uint8_t)(sz>>8);
         out[written++] = (uint8_t)(sz>>16); out[written++] = (uint8_t)(sz>>24);
         out[written++] = (uint8_t)(sz); out[written++] = (uint8_t)(sz>>8);
         out[written++] = (uint8_t)(sz>>16); out[written++] = (uint8_t)(sz>>24);
         out[written++] = (uint8_t)(fn_len); out[written++] = (uint8_t)(fn_len>>8);
-        out[written++] = 0; out[written++] = 0;
+        out[written++] = 0; out[written++] = 0;  /* extra len */
         memcpy(out + written, filenames[i], fn_len); written += fn_len;
         memcpy(out + written, datas[i], sz); written += sz;
     }
@@ -329,6 +332,7 @@ size_t pas_zip_create(const char **filenames, const void **datas, const size_t *
     cd_offset = (uint32_t)written;
     for (i = 0; i < file_count; i++) {
         uint16_t fn_len = (uint16_t)strlen(filenames[i]);
+        uint32_t sz = (uint32_t)sizes[i];
         uint32_t local_off = 0;
         size_t j;
         for (j = 0; j < (size_t)i; j++)
@@ -341,11 +345,15 @@ size_t pas_zip_create(const char **filenames, const void **datas, const size_t *
         out[written++] = 0x50; out[written++] = 0x4b; out[written++] = 0x01; out[written++] = 0x02;
         out[written++] = 20; out[written++] = 0; out[written++] = 20; out[written++] = 0;
         out[written++] = 0; out[written++] = 0; out[written++] = 0; out[written++] = 0;
-        for (n = 0; n < 12; n++) out[written++] = 0;
+        for (n = 0; n < 8; n++) out[written++] = 0;
+        out[written++] = (uint8_t)(sz); out[written++] = (uint8_t)(sz>>8);
+        out[written++] = (uint8_t)(sz>>16); out[written++] = (uint8_t)(sz>>24);
+        out[written++] = (uint8_t)(sz); out[written++] = (uint8_t)(sz>>8);
+        out[written++] = (uint8_t)(sz>>16); out[written++] = (uint8_t)(sz>>24);
         out[written++] = (uint8_t)(fn_len); out[written++] = (uint8_t)(fn_len>>8);
         out[written++] = 0; out[written++] = 0; out[written++] = 0; out[written++] = 0;
         out[written++] = 0; out[written++] = 0; out[written++] = 0; out[written++] = 0;
-        out[written++] = 0; out[written++] = 0;
+        out[written++] = 0; out[written++] = 0; out[written++] = 0; out[written++] = 0;  /* extra, comment, disk, internal, external */
         out[written++] = (uint8_t)(local_off); out[written++] = (uint8_t)(local_off>>8);
         out[written++] = (uint8_t)(local_off>>16); out[written++] = (uint8_t)(local_off>>24);
         memcpy(out + written, filenames[i], fn_len); written += fn_len;
