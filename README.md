@@ -5,6 +5,7 @@ Single-header C libraries in stb style: no malloc, user buffers, OS-only depende
 - **pas_unicode.h** — UTF-8/16/32 encode/decode, conversions, length, C-strings; optional C11 `char16_t`/`char32_t`.
 - **pas_http1.h** — HTTP/1.1 client: GET/POST, URL parsing, timeouts, response parsing; uses OS sockets only (Winsock2 / BSD).
 - **pas_gfx.h** — 2D framebuffer graphics: pixel, line, rect, circle, bitmap (alpha mask); optional stb_truetype text; window frame and button primitives; 32-bit RGBA, no malloc.
+- **pas_zip.h** — ZIP reader (Central Directory): Store always, Deflate via miniz/zlib; optional ZIP creation (Store only); no malloc.
 
 ---
 
@@ -156,6 +157,28 @@ HTTP/1.1 client: one header, no malloc, OS sockets only (Windows: Winsock2, Unix
 
 ---
 
+# pas_zip.h
+
+Single-header ZIP archiver in stb style: **no malloc**, user-provided buffers. Reads ZIP (Central Directory), extracts Store (always) and Deflate (optional via miniz/zlib), optionally creates Store-only ZIPs.
+
+**Usage:** In one TU define `PAS_ZIP_IMPLEMENTATION` then `#include "pas_zip.h"`.
+
+**Optional Deflate:** Define `PAS_ZIP_USE_MINIZ` and include `miniz.h` (or `PAS_ZIP_USE_ZLIB` and `<zlib.h>`) before `pas_zip.h` to enable Deflate extraction.
+
+**API**
+- `pas_zip_t* pas_zip_open(const void* data, size_t size, pas_zip_status* status)` — open ZIP from memory.
+- `pas_zip_file_t* pas_zip_find(pas_zip_t* zip, const char* name)` — find entry by name.
+- `const char* pas_zip_name(pas_zip_file_t* file)` — entry name.
+- `size_t pas_zip_size(pas_zip_file_t* file)` — uncompressed size.
+- `int pas_zip_is_compressed(pas_zip_file_t* file)` — non-zero if Deflate.
+- `size_t pas_zip_extract(pas_zip_file_t* file, void* buffer, size_t buffer_size, pas_zip_status* status)` — extract to buffer.
+- `int pas_zip_list(pas_zip_t* zip, void (*callback)(const char* name, size_t size, void* user), void* user)` — enumerate entries.
+- `size_t pas_zip_create(const char** filenames, const void** datas, size_t* sizes, int file_count, void* buffer, size_t buffer_size, pas_zip_status* status)` — create Store-only ZIP.
+
+**Errors:** `PAS_ZIP_OK`, `PAS_ZIP_E_INVALID`, `PAS_ZIP_E_NOT_FOUND`, `PAS_ZIP_E_COMPRESSED` (Deflate not supported), `PAS_ZIP_E_NOSPACE`, `PAS_ZIP_E_ZLIB`.
+
+---
+
 ## Examples and tests
 
 Layout: **examples/** and **tests/** are split by library: **pas_unicode/**, **pas_http1/**, **pas_gfx/**.
@@ -169,6 +192,15 @@ Layout: **examples/** and **tests/** are split by library: **pas_unicode/**, **p
 **pas_http1**
 - **examples/pas_http1/example_get.c** — GET request.
 - **tests/pas_http1/test_pas_http1.c** — invalid URL, null buffer, optional live GET.
+
+**pas_zip**
+- **examples/pas_zip/example_list.c** — list files in a ZIP.
+- **examples/pas_zip/example_extract.c** — extract entry to buffer or file.
+- **examples/pas_zip/example_create.c** — create Store-only ZIP (example.zip).
+- **tests/pas_zip/test_open.c** — open valid ZIP, reject invalid data.
+- **tests/pas_zip/test_find.c** — find entry by name.
+- **tests/pas_zip/test_extract.c** — extract Store entry, NOSPACE.
+- **tests/pas_zip/test_extract_deflate.c** — extract Deflate entry (requires `PAS_ZIP_USE_MINIZ` and miniz).
 
 **pas_gfx**
 - **examples/pas_gfx/example_primitives.c** — 1024×768 in-memory fb, lines/rects/circles, save to PPM (raw RGB).
@@ -187,6 +219,15 @@ gcc -o tests/pas_unicode/test_pas_unicode tests/pas_unicode/test_pas_unicode.c -
 gcc -o examples/pas_http1/example_get examples/pas_http1/example_get.c -I.
 gcc -o tests/pas_http1/test_pas_http1 tests/pas_http1/test_pas_http1.c -I.
 
+gcc -o examples/pas_zip/example_list    examples/pas_zip/example_list.c    -I.
+gcc -o examples/pas_zip/example_extract examples/pas_zip/example_extract.c -I.
+gcc -o examples/pas_zip/example_create  examples/pas_zip/example_create.c  -I.
+gcc -o tests/pas_zip/test_open          tests/pas_zip/test_open.c          -I.
+gcc -o tests/pas_zip/test_find          tests/pas_zip/test_find.c          -I.
+gcc -o tests/pas_zip/test_extract       tests/pas_zip/test_extract.c       -I.
+# Deflate test: requires miniz in include path
+# gcc -o tests/pas_zip/test_extract_deflate tests/pas_zip/test_extract_deflate.c miniz.c -I. -DPAS_ZIP_USE_MINIZ
+
 gcc -o examples/pas_gfx/example_primitives examples/pas_gfx/example_primitives.c -I.
 gcc -o examples/pas_gfx/example_window     examples/pas_gfx/example_window.c -I.
 gcc -o examples/pas_gfx/example_text       examples/pas_gfx/example_text.c -I. -DPAS_GFX_USE_STB_TRUETYPE
@@ -195,12 +236,18 @@ gcc -o tests/pas_gfx/test_pas_gfx          tests/pas_gfx/test_pas_gfx.c -I.
 
 On Windows with MinGW, link pas_http1 with `-lws2_32` if the header’s pragma doesn’t pull it in.
 
+Run pas_zip examples: `example_list <file.zip>`, `example_extract <file.zip> <entry> [output]`, `example_create` creates `example.zip`.
+
 Run tests:
 
 ```bash
 ./tests/pas_unicode/test_pas_unicode
 ./tests/pas_http1/test_pas_http1
 ./tests/pas_gfx/test_pas_gfx
+./tests/pas_zip/test_open
+./tests/pas_zip/test_find
+./tests/pas_zip/test_extract
+# ./tests/pas_zip/test_extract_deflate  # requires miniz + PAS_ZIP_USE_MINIZ
 ```
 
 ---
