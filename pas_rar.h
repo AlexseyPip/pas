@@ -7,8 +7,9 @@
 
     Format support:
       - RAR4 ("Rar!\x1A\x07\x00"): header parsing + file listing + extraction for METHOD=store only.
-      - RAR5 ("Rar!\x1A\x07\x01\x00"): detected, returns PAS_RAR_E_UNSUPPORTED (RAR5 headers are different).
-      - Compressed methods: detected, returns PAS_RAR_E_COMPRESSED.
+      - RAR5 ("Rar!\x1A\x07\x01\x00"): basic support — file listing and extraction for uncompressed files
+        (compression method 0, non-solid, non-encrypted).
+      - Compressed methods (RAR4/RAR5): detected, return PAS_RAR_E_COMPRESSED.
 
     Usage:
         In ONE translation unit:
