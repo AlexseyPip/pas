@@ -1,4 +1,4 @@
-# PAS + OS (UNLICENCE)
+# PAS
 
 Single-header C libraries in stb style: no malloc, user buffers, OS-only dependencies.
 
@@ -6,6 +6,8 @@ Single-header C libraries in stb style: no malloc, user buffers, OS-only depende
 - **pas_http1.h** — HTTP/1.1 client: GET/POST, URL parsing, timeouts, response parsing; uses OS sockets only (Winsock2 / BSD).
 - **pas_gfx.h** — 2D framebuffer graphics: pixel, line, rect, circle, bitmap (alpha mask); optional stb_truetype text; window frame and button primitives; 32-bit RGBA, no malloc.
 - **pas_zip.h** — ZIP reader (Central Directory): Store always, Deflate via miniz/zlib; optional ZIP creation (Store only); no malloc.
+- **pas_fs.h** — Virtual FS with mount points: FAT32 (read-only), RAM FS (read-write); no malloc.
+- **pas_rar.h** — RAR reader (RAR4 + basic RAR5): no malloc, read from memory; lists entries and extracts only uncompressed files (store, no encryption).
 
 ---
 
@@ -157,6 +159,29 @@ HTTP/1.1 client: one header, no malloc, OS sockets only (Windows: Winsock2, Unix
 
 ---
 
+# pas_fs.h
+
+Single-header virtual filesystem (stb-style): **no malloc**, user-provided buffers, static mount table.
+
+**Usage:** In one TU define `PAS_FS_IMPLEMENTATION` then `#include "pas_fs.h"`.
+
+**API**
+- `void pas_fs_init(void)` — clear mount table.
+- `int pas_fs_mount(const char *path, const pas_fs_driver_t *driver, void *device)` — mount driver at path.
+- `pas_fs_file_t *pas_fs_open(const char *path, pas_fs_status *status)` — open file.
+- `size_t pas_fs_read(pas_fs_file_t *file, void *buffer, size_t size, pas_fs_status *status)` — read.
+- `void pas_fs_close(pas_fs_file_t *file)` — close.
+- `int pas_fs_exists(const char *path)` — file exists.
+- `size_t pas_fs_size(const char *path)` — file size.
+
+**Built-in drivers:** `pas_fs_fat32_driver` (read-only, memory image), `pas_fs_ram_driver` (read-write).
+
+**Device types:** `pas_fs_ram_device_t`, `pas_fs_ram_entry_t`, `pas_fs_fat32_device_t`.
+
+**Errors:** `PAS_FS_OK`, `PAS_FS_E_NOT_FOUND`, `PAS_FS_E_ACCESS`, `PAS_FS_E_IO`, `PAS_FS_E_NOSPACE`.
+
+---
+
 # pas_zip.h
 
 Single-header ZIP archiver in stb style: **no malloc**, user-provided buffers. Reads ZIP (Central Directory), extracts Store (always) and Deflate (optional via miniz/zlib), optionally creates Store-only ZIPs.
@@ -176,6 +201,29 @@ Single-header ZIP archiver in stb style: **no malloc**, user-provided buffers. R
 - `size_t pas_zip_create(const char** filenames, const void** datas, size_t* sizes, int file_count, void* buffer, size_t buffer_size, pas_zip_status* status)` — create Store-only ZIP.
 
 **Errors:** `PAS_ZIP_OK`, `PAS_ZIP_E_INVALID`, `PAS_ZIP_E_NOT_FOUND`, `PAS_ZIP_E_COMPRESSED` (Deflate not supported), `PAS_ZIP_E_NOSPACE`, `PAS_ZIP_E_ZLIB`.
+
+---
+
+# pas_rar.h
+
+Single-header RAR reader in stb style: **no malloc**, user-provided buffers. Reads RAR archives from memory and provides a tiny API for listing and extracting files.
+
+**Supported formats:**
+- **RAR4** (`Rar!\x1A\x07\x00`): parses headers, lists files, extracts only **store** (0x30) entries (no compression, no encryption).
+- **RAR5** (`Rar!\x1A\x07\x01\x00`): basic support for **uncompressed, non-solid, non-encrypted** files (compression method 0). Encrypted or compressed entries are reported as unsupported.
+
+**Usage:** In one TU define `PAS_RAR_IMPLEMENTATION` then `#include "pas_rar.h"`.
+
+**API**
+- `pas_rar_t *pas_rar_open(const void *data, size_t size, pas_rar_status *status)` — open RAR from memory.
+- `pas_rar_file_t *pas_rar_find(pas_rar_t *rar, const char *name)` — find file by name.
+- `const char *pas_rar_name(pas_rar_file_t *file)` — entry name.
+- `uint64_t pas_rar_size(pas_rar_file_t *file)` — uncompressed size.
+- `int pas_rar_is_compressed(pas_rar_file_t *file)` — non-zero if entry is compressed (unsupported by this header).
+- `size_t pas_rar_extract(pas_rar_file_t *file, void *buffer, size_t buffer_size, pas_rar_status *status)` — extract to buffer (only for uncompressed files).
+- `int pas_rar_list(pas_rar_t *rar, void (*callback)(const char *name, uint64_t size, void *user), void *user)` — enumerate entries.
+
+**Errors:** `PAS_RAR_OK`, `PAS_RAR_E_INVALID`, `PAS_RAR_E_NOT_FOUND`, `PAS_RAR_E_COMPRESSED`, `PAS_RAR_E_UNSUPPORTED`, `PAS_RAR_E_NOSPACE`, `PAS_RAR_E_RANGE`.
 
 ---
 
@@ -202,6 +250,15 @@ Layout: **examples/** and **tests/** are split by library: **pas_unicode/**, **p
 - **tests/pas_zip/test_extract.c** — extract Store entry, NOSPACE.
 - **tests/pas_zip/test_extract_deflate.c** — extract Deflate entry (requires `PAS_ZIP_USE_MINIZ` and miniz).
 
+**pas_fs**
+- **examples/pas_fs/example_mount.c** — mount RAM FS and optionally FAT32 image.
+- **examples/pas_fs/example_read.c** — read files from virtual FS.
+- **examples/pas_fs/example_write.c** — write to RAM FS (writable entry).
+- **tests/pas_fs/test_mount.c** — init, mount, exists.
+- **tests/pas_fs/test_ram.c** — RAM FS read/write.
+- **tests/pas_fs/test_fat32.c** — FAT32 driver (minimal image).
+- **tests/pas_fs/test_errors.c** — error codes.
+
 **pas_gfx**
 - **examples/pas_gfx/example_primitives.c** — 1024×768 in-memory fb, lines/rects/circles, save to PPM (raw RGB).
 - **examples/pas_gfx/example_window.c** — window frame with title, button (pressed/unpressed), built-in font, save to PPM.
@@ -225,6 +282,15 @@ gcc -o examples/pas_zip/example_create  examples/pas_zip/example_create.c  -I.
 gcc -o tests/pas_zip/test_open          tests/pas_zip/test_open.c          -I.
 gcc -o tests/pas_zip/test_find          tests/pas_zip/test_find.c          -I.
 gcc -o tests/pas_zip/test_extract       tests/pas_zip/test_extract.c       -I.
+
+gcc -o examples/pas_fs/example_mount   examples/pas_fs/example_mount.c   -I.
+gcc -o examples/pas_fs/example_read    examples/pas_fs/example_read.c    -I.
+gcc -o examples/pas_fs/example_write   examples/pas_fs/example_write.c   -I.
+gcc -o tests/pas_fs/test_mount         tests/pas_fs/test_mount.c         -I.
+gcc -o tests/pas_fs/test_ram           tests/pas_fs/test_ram.c           -I.
+gcc -o tests/pas_fs/test_fat32         tests/pas_fs/test_fat32.c         -I.
+gcc -o tests/pas_fs/test_errors        tests/pas_fs/test_errors.c        -I.
+
 # Deflate test: requires miniz in include path
 # gcc -o tests/pas_zip/test_extract_deflate tests/pas_zip/test_extract_deflate.c miniz.c -I. -DPAS_ZIP_USE_MINIZ
 
@@ -248,6 +314,11 @@ Run tests:
 ./tests/pas_zip/test_find
 ./tests/pas_zip/test_extract
 # ./tests/pas_zip/test_extract_deflate  # requires miniz + PAS_ZIP_USE_MINIZ
+
+./tests/pas_fs/test_mount
+./tests/pas_fs/test_ram
+./tests/pas_fs/test_fat32
+./tests/pas_fs/test_errors
 ```
 
 ---
