@@ -147,6 +147,104 @@ static int pas_rar__read_common4(const uint8_t *data, size_t size, size_t off,
     return 1;
 }
 
+/* ----- RAR5 helpers ----- */
+
+/* vint decoder: value is stored in lower 7 bits of each byte, high bit = continuation flag. */
+static int pas_rar__read_vint(const uint8_t *p, const uint8_t *end, uint64_t *out, size_t *len)
+{
+    uint64_t v = 0;
+    int shift = 0;
+    size_t n = 0;
+
+    if (!p || !end || p >= end || !out || !len) return 0;
+
+    while (p < end && n < 10) {
+        uint8_t b = *p++;
+        v |= (uint64_t)(b & 0x7fu) << shift;
+        n++;
+        if ((b & 0x80u) == 0)
+            break;
+        shift += 7;
+    }
+    if (n == 0 || (p > end)) return 0;
+    *out = v;
+    *len = n;
+    return 1;
+}
+
+/* Parse generic RAR5 block header starting at off.
+   On success returns 1 and fills:
+     - *type: header type (1=main, 2=file, 3=service, 4=encryption, 5=end)
+     - *flags: header flags
+     - *extra_size: extra area size (0 if none)
+     - *data_size: data area size (0 if none)
+     - *file_hdr_off: offset inside archive where file-specific fields start (File flags for type=2)
+     - *hdr_end_off: offset just after header (start of data area, if any)
+     - *next_off: offset of next block (hdr_end_off + data_size if data present, else hdr_end_off)
+*/
+static int pas_rar__read_block5(const uint8_t *data, size_t size, size_t off,
+                                uint64_t *type, uint64_t *flags,
+                                uint64_t *extra_size, uint64_t *data_size,
+                                size_t *file_hdr_off,
+                                size_t *hdr_end_off,
+                                size_t *next_off)
+{
+    const uint8_t *p;
+    const uint8_t *end = data + size;
+    uint64_t hdr_size = 0;
+    size_t len = 0;
+    uint64_t t = 0, fl = 0, exsz = 0, dsz = 0;
+    size_t hs_len;
+
+    if (!data || off > size || size - off < 6) return 0;
+
+    /* Skip CRC32 */
+    p = data + off + 4;
+    if (p > end) return 0;
+
+    /* Header size (vint) */
+    if (!pas_rar__read_vint(p, end, &hdr_size, &len)) return 0;
+    hs_len = len;
+    p += len;
+
+    if (hdr_size > (uint64_t)(end - p)) return 0;
+    {
+        const uint8_t *hdr_start = p;
+        const uint8_t *hdr_end = hdr_start + (size_t)hdr_size;
+
+        /* Header type */
+        if (!pas_rar__read_vint(p, hdr_end, &t, &len)) return 0;
+        p += len;
+        /* Header flags */
+        if (!pas_rar__read_vint(p, hdr_end, &fl, &len)) return 0;
+        p += len;
+
+        if (fl & 0x0001u) {
+            if (!pas_rar__read_vint(p, hdr_end, &exsz, &len)) return 0;
+            p += len;
+        }
+        if (fl & 0x0002u) {
+            if (!pas_rar__read_vint(p, hdr_end, &dsz, &len)) return 0;
+            p += len;
+        }
+
+        if (file_hdr_off) *file_hdr_off = (size_t)(p - data);
+        if (hdr_end_off) *hdr_end_off = (size_t)(hdr_end - data);
+        if (next_off) {
+            uint64_t n = (uint64_t)(hdr_end - data) + dsz;
+            if (n > (uint64_t)size) return 0;
+            *next_off = (size_t)n;
+        }
+    }
+
+    if (type) *type = t;
+    if (flags) *flags = fl;
+    if (extra_size) *extra_size = exsz;
+    if (data_size) *data_size = dsz;
+
+    return 1;
+}
+
 /* Skip main header if present; returns offset to start scanning for file headers. */
 static int pas_rar__init_scan4(pas_rar_status *status, size_t *out_scan_off)
 {
@@ -194,8 +292,9 @@ pas_rar_t *pas_rar_open(const void *data, size_t size, pas_rar_status *status)
 
     if (size >= 8 && pas_rar__memcmp(data, sig5, 8) == 0) {
         pas_rar__handle.format = 5;
-        if (status) *status = PAS_RAR_E_UNSUPPORTED;
-        return NULL;
+        pas_rar__handle.scan_offset = 8; /* first block starts after 8-byte RAR5 signature */
+        if (status) *status = PAS_RAR_OK;
+        return &pas_rar__handle;
     }
     if (pas_rar__memcmp(data, sig4, 7) != 0) {
         if (status) *status = PAS_RAR_E_INVALID;
