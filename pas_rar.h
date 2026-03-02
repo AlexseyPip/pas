@@ -436,12 +436,213 @@ static int pas_rar__iterate4(pas_rar_t *rar,
     return find_name ? 0 : (saw_any ? 1 : 1);
 }
 
+/* ----- RAR5 iteration ----- */
+
+static int pas_rar__parse_file5(size_t file_hdr_off,
+                                uint64_t extra_size,
+                                uint64_t data_size,
+                                pas_rar_file_t *out)
+{
+    const uint8_t *d = pas_rar__handle.data;
+    size_t sz = pas_rar__handle.size;
+    const uint8_t *p = d + file_hdr_off;
+    const uint8_t *end = d + sz;
+    uint64_t file_flags = 0;
+    uint64_t unp_size = 0;
+    uint64_t attrs = 0;
+    uint64_t comp_info = 0;
+    uint64_t host_os = 0;
+    uint64_t name_len = 0;
+    size_t len = 0;
+    size_t header_data_end;
+    size_t extra_start = 0;
+    int encrypted = 0;
+    uint64_t val = 0;
+
+    /* We rely on caller to ensure that file_hdr_off is within range and that
+       header_end and extra_size/data_size are consistent. */
+    if (file_hdr_off >= sz) return 0;
+
+    /* Recover header_end and extra_start from extra_size:
+       header_end = data_offset (for file header) which is file_hdr_off + (header_data_bytes we don't know exactly).
+       Instead of recomputing, we treat extra area as located immediately before data area and derive positions
+       from data offset and extra_size. For that we need data offset, so this function must be called with
+       file_hdr_off pointing to File flags and the caller must provide header end / data offset. To keep this
+       function self-contained, we recompute header end by walking vint fields until Name. */
+
+    /* Decode: File flags */
+    if (!pas_rar__read_vint(p, end, &file_flags, &len)) return 0;
+    p += len;
+    /* Unpacked size */
+    if (!pas_rar__read_vint(p, end, &unp_size, &len)) return 0;
+    p += len;
+    /* Attributes */
+    if (!pas_rar__read_vint(p, end, &attrs, &len)) return 0;
+    p += len;
+    /* Optional mtime */
+    if (file_flags & 0x0002u) {
+        if (p + 4 > end) return 0;
+        p += 4;
+    }
+    /* Optional data CRC32 */
+    if (file_flags & 0x0004u) {
+        if (p + 4 > end) return 0;
+        p += 4;
+    }
+
+    /* Compression information */
+    if (!pas_rar__read_vint(p, end, &comp_info, &len)) return 0;
+    p += len;
+    (void)host_os;
+    if (!pas_rar__read_vint(p, end, &host_os, &len)) return 0;
+    p += len;
+
+    /* Name length + name */
+    if (!pas_rar__read_vint(p, end, &name_len, &len)) return 0;
+    p += len;
+    if (name_len > (uint64_t)(end - p)) return 0;
+
+    {
+        size_t copy = (size_t)name_len;
+        if (copy >= sizeof(pas_rar__name_buf)) copy = sizeof(pas_rar__name_buf) - 1;
+        memcpy(pas_rar__name_buf, p, copy);
+        pas_rar__name_buf[copy] = '\0';
+        p += name_len;
+    }
+
+    /* At this point, p points just after Name field. Extra area, if any, starts here
+       and has size extra_size. Data area immediately follows extra area and has size data_size. */
+    header_data_end = (size_t)(p - d);
+    if (extra_size > 0) {
+        size_t exsz = (size_t)extra_size;
+        if (header_data_end + exsz > sz) return 0;
+        extra_start = header_data_end;
+
+        /* Scan extra area records for File encryption record (type 0x01). */
+        {
+            const uint8_t *ep = d + extra_start;
+            const uint8_t *eend = ep + exsz;
+            while (ep < eend) {
+                size_t rec_len = 0;
+                size_t type_len = 0;
+                uint64_t rec_size = 0;
+                uint64_t rec_type = 0;
+
+                if (!pas_rar__read_vint(ep, eend, &rec_size, &rec_len)) return 0;
+                ep += rec_len;
+                if (!pas_rar__read_vint(ep, eend, &rec_type, &type_len)) return 0;
+                if (rec_size < type_len) return 0;
+
+                if (rec_type == 0x01u) {
+                    encrypted = 1;
+                }
+
+                if (rec_size > (uint64_t)(eend - (ep - type_len))) return 0;
+                /* Skip the rest of this record (Type + Data) minus what we already consumed for Type. */
+                ep += (size_t)rec_size - type_len;
+            }
+        }
+    }
+
+    /* Validate flags for minimal support:
+       - No directory only entries.
+       - Unpacked size known (no 0x0008 flag).
+       - No encryption.
+       - Compression method == 0 (no compression). */
+    if (file_flags & 0x0001u) return 2; /* directory: skip */
+    if (file_flags & 0x0008u) return 2; /* unknown unpacked size: skip */
+    if (encrypted) return 2;           /* encrypted: unsupported */
+
+    {
+        uint64_t method_bits = (comp_info & 0x0380u) >> 7; /* see spec: 0x003f=version, 0x0040=solid, 0x0380=method */
+        if (method_bits != 0) return 2; /* compressed: unsupported */
+    }
+
+    /* For uncompressed data, data_size must match uncompressed size. */
+    if (unp_size != data_size) return 0;
+
+    /* Compute data offset: header_data_end + extra_size. */
+    {
+        uint64_t data_off_u64 = (uint64_t)header_data_end + extra_size;
+        if (data_off_u64 + data_size > (uint64_t)sz) return 0;
+        if (data_off_u64 > (uint64_t)UINT32_MAX) return 0;
+
+        out->name = pas_rar__name_buf;
+        out->packed_size = data_size;
+        out->unpacked_size = unp_size;
+        out->method = PAS_RAR_METHOD_STORE; /* unify: store for RAR4 and RAR5 */
+        out->data_offset = (uint32_t)data_off_u64;
+    }
+
+    return 1;
+}
+
+static int pas_rar__iterate5(pas_rar_t *rar,
+                             const char *find_name,
+                             pas_rar_file_t *out,
+                             void (*cb)(const char *, uint64_t, void *),
+                             void *user)
+{
+    size_t off;
+    int saw_any = 0;
+
+    if (!rar || rar->format != 5) return 0;
+    off = rar->scan_offset;
+    if (off >= rar->size) return 0;
+
+    while (off + 6 <= rar->size) {
+        uint64_t type = 0, flags = 0, extra_size = 0, data_size = 0;
+        size_t file_hdr_off = 0;
+        size_t hdr_end_off = 0;
+        size_t next_off = 0;
+
+        if (!pas_rar__read_block5(rar->data, rar->size, off,
+                                  &type, &flags, &extra_size, &data_size,
+                                  &file_hdr_off, &hdr_end_off, &next_off))
+            return 0;
+        if (next_off <= off) return 0;
+
+        if (type == 5) { /* End of archive */
+            break;
+        }
+
+        /* Archive encryption header means we cannot process this archive. */
+        if (type == 4) {
+            return 0;
+        }
+
+        if (type == 2) { /* File header */
+            pas_rar_file_t f;
+            int r = pas_rar__parse_file5(file_hdr_off, extra_size, data_size, &f);
+            if (r == 0) return 0;
+            if (r == 1) {
+                saw_any = 1;
+                if (cb) cb(f.name, f.unpacked_size, user);
+                if (find_name && strcmp(f.name, find_name) == 0) {
+                    if (out) *out = f;
+                    return 1;
+                }
+            }
+            /* r==2: entry skipped, continue */
+        }
+
+        off = next_off;
+    }
+
+    return find_name ? 0 : (saw_any ? 1 : 1);
+}
+
 pas_rar_file_t *pas_rar_find(pas_rar_t *rar, const char *name)
 {
     pas_rar_file_t ent;
     if (!rar || !name) return NULL;
-    if (rar->format != 4) return NULL;
-    if (!pas_rar__iterate4(rar, name, &ent, NULL, NULL)) return NULL;
+    if (rar->format == 4) {
+        if (!pas_rar__iterate4(rar, name, &ent, NULL, NULL)) return NULL;
+    } else if (rar->format == 5) {
+        if (!pas_rar__iterate5(rar, name, &ent, NULL, NULL)) return NULL;
+    } else {
+        return NULL;
+    }
     pas_rar__current_file = ent;
     return &pas_rar__current_file;
 }
@@ -488,8 +689,11 @@ size_t pas_rar_extract(pas_rar_file_t *file, void *buffer, size_t buffer_size, p
 int pas_rar_list(pas_rar_t *rar, void (*callback)(const char *name, uint64_t size, void *user), void *user)
 {
     if (!rar || !callback) return -1;
-    if (rar->format != 4) return -1;
-    return pas_rar__iterate4(rar, NULL, NULL, callback, user) ? 0 : -1;
+    if (rar->format == 4)
+        return pas_rar__iterate4(rar, NULL, NULL, callback, user) ? 0 : -1;
+    if (rar->format == 5)
+        return pas_rar__iterate5(rar, NULL, NULL, callback, user) ? 0 : -1;
+    return -1;
 }
 
 #endif /* PAS_RAR_IMPLEMENTATION */
