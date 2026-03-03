@@ -1,4 +1,5 @@
 # PAS
+
 Single-header C libraries in stb style: no malloc, user buffers, OS-only dependencies.
 
 - **pas_unicode.h** — UTF-8/16/32 encode/decode, conversions, length, C-strings; optional C11 `char16_t`/`char32_t`.
@@ -7,6 +8,7 @@ Single-header C libraries in stb style: no malloc, user buffers, OS-only depende
 - **pas_zip.h** — ZIP reader (Central Directory): Store always, Deflate via miniz/zlib; optional ZIP creation (Store only); no malloc.
 - **pas_fs.h** — Virtual FS with mount points: FAT32 (read-only), RAM FS (read-write); no malloc.
 - **pas_rar.h** — RAR reader (RAR4 + basic RAR5): no malloc, read from memory; lists entries and extracts only uncompressed files (store, no encryption).
+- **pas_7z.h** — 7z reader: no malloc, read from memory; **non-packed header only**; lists files and extracts only Copy (no compression) entries; names UTF-16LE→UTF-8.
 
 ---
 
@@ -226,6 +228,24 @@ Single-header RAR reader in stb style: **no malloc**, user-provided buffers. Rea
 
 ---
 
+# pas_7z.h
+
+Single-header 7z reader in stb style: **no malloc**, user-provided buffers. Reads 7z from memory. Supports only **non-packed (raw) header**; packed/encoded header returns `PAS_7Z_E_UNSUPPORTED`. Extracts only entries in **Copy** (no compression) folders.
+
+**Usage:** In one TU define `PAS_7Z_IMPLEMENTATION` then `#include "pas_7z.h"`.
+
+**API**
+- `pas_7z_t *pas_7z_open(const void *data, size_t size, pas_7z_status *status)` — open 7z from memory.
+- `pas_7z_file_t *pas_7z_find(pas_7z_t *arch, const char *name)` — find file by name (UTF-8).
+- `const char *pas_7z_name(pas_7z_file_t *file)`, `uint64_t pas_7z_size(pas_7z_file_t *file)`.
+- `int pas_7z_is_compressed(pas_7z_file_t *file)`, `int pas_7z_is_dir(pas_7z_file_t *file)`.
+- `size_t pas_7z_extract(pas_7z_file_t *file, void *buffer, size_t buffer_size, pas_7z_status *status)` — extract (Copy only).
+- `int pas_7z_list(pas_7z_t *arch, void (*callback)(const char *name, uint64_t size, int is_dir, void *user), void *user)`.
+
+**Errors:** `PAS_7Z_OK`, `PAS_7Z_E_INVALID`, `PAS_7Z_E_NOT_FOUND`, `PAS_7Z_E_COMPRESSED`, `PAS_7Z_E_UNSUPPORTED`, `PAS_7Z_E_NOSPACE`, `PAS_7Z_E_RANGE`.
+
+---
+
 ## Examples and tests
 
 Layout: **examples/** and **tests/** are split by library: **pas_unicode/**, **pas_http1/**, **pas_gfx/**.
@@ -246,6 +266,11 @@ Layout: **examples/** and **tests/** are split by library: **pas_unicode/**, **p
 - **tests/pas_rar/test_open.c** — open valid RAR4/RAR5, reject invalid data.
 - **tests/pas_rar/test_find.c** — find entry by name.
 - **tests/pas_rar/test_extract.c** — extract store entry, NOSPACE.
+
+**pas_7z**
+- **examples/pas_7z/example_list.c** — list files in a .7z archive.
+- **examples/pas_7z/example_extract.c** — extract entry (Copy only).
+- **tests/pas_7z/test_open.c** — open valid/invalid data.
 
 **pas_zip**
 - **examples/pas_zip/example_list.c** — list files in a ZIP.
@@ -288,6 +313,10 @@ gcc -o tests/pas_rar/test_open          tests/pas_rar/test_open.c          -I.
 gcc -o tests/pas_rar/test_find          tests/pas_rar/test_find.c          -I.
 gcc -o tests/pas_rar/test_extract       tests/pas_rar/test_extract.c       -I.
 
+gcc -o examples/pas_7z/example_list    examples/pas_7z/example_list.c    -I.
+gcc -o examples/pas_7z/example_extract examples/pas_7z/example_extract.c -I.
+gcc -o tests/pas_7z/test_open          tests/pas_7z/test_open.c          -I.
+
 gcc -o examples/pas_zip/example_list    examples/pas_zip/example_list.c    -I.
 gcc -o examples/pas_zip/example_extract examples/pas_zip/example_extract.c -I.
 gcc -o examples/pas_zip/example_create  examples/pas_zip/example_create.c  -I.
@@ -316,6 +345,8 @@ On Windows with MinGW, link pas_http1 with `-lws2_32` if the header’s pragma d
 
 Run pas_rar examples: `example_list <file.rar>`, `example_extract <file.rar> <entry> [output]`.
 
+Run pas_7z examples: `example_list <file.7z>`, `example_extract <file.7z> <entry> [output]` (Copy/stored entries only).
+
 Run pas_zip examples: `example_list <file.zip>`, `example_extract <file.zip> <entry> [output]`, `example_create` creates `example.zip`.
 
 Run tests:
@@ -327,6 +358,8 @@ Run tests:
 ./tests/pas_rar/test_open
 ./tests/pas_rar/test_find
 ./tests/pas_rar/test_extract
+
+./tests/pas_7z/test_open
 
 ./tests/pas_zip/test_open
 ./tests/pas_zip/test_find
