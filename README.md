@@ -1,5 +1,4 @@
 # PAS
-
 Single-header C libraries in stb style: no malloc, user buffers, OS-only dependencies.
 
 - **pas_unicode.h** — UTF-8/16/32 encode/decode, conversions, length, C-strings; optional C11 `char16_t`/`char32_t`.
@@ -241,6 +240,13 @@ Layout: **examples/** and **tests/** are split by library: **pas_unicode/**, **p
 - **examples/pas_http1/example_get.c** — GET request.
 - **tests/pas_http1/test_pas_http1.c** — invalid URL, null buffer, optional live GET.
 
+**pas_rar**
+- **examples/pas_rar/example_list.c** — list files in a RAR archive.
+- **examples/pas_rar/example_extract.c** — extract entry (store/uncompressed only).
+- **tests/pas_rar/test_open.c** — open valid RAR4/RAR5, reject invalid data.
+- **tests/pas_rar/test_find.c** — find entry by name.
+- **tests/pas_rar/test_extract.c** — extract store entry, NOSPACE.
+
 **pas_zip**
 - **examples/pas_zip/example_list.c** — list files in a ZIP.
 - **examples/pas_zip/example_extract.c** — extract entry to buffer or file.
@@ -276,6 +282,12 @@ gcc -o tests/pas_unicode/test_pas_unicode tests/pas_unicode/test_pas_unicode.c -
 gcc -o examples/pas_http1/example_get examples/pas_http1/example_get.c -I.
 gcc -o tests/pas_http1/test_pas_http1 tests/pas_http1/test_pas_http1.c -I.
 
+gcc -o examples/pas_rar/example_list    examples/pas_rar/example_list.c    -I.
+gcc -o examples/pas_rar/example_extract examples/pas_rar/example_extract.c -I.
+gcc -o tests/pas_rar/test_open          tests/pas_rar/test_open.c          -I.
+gcc -o tests/pas_rar/test_find          tests/pas_rar/test_find.c          -I.
+gcc -o tests/pas_rar/test_extract       tests/pas_rar/test_extract.c       -I.
+
 gcc -o examples/pas_zip/example_list    examples/pas_zip/example_list.c    -I.
 gcc -o examples/pas_zip/example_extract examples/pas_zip/example_extract.c -I.
 gcc -o examples/pas_zip/example_create  examples/pas_zip/example_create.c  -I.
@@ -302,6 +314,8 @@ gcc -o tests/pas_gfx/test_pas_gfx          tests/pas_gfx/test_pas_gfx.c -I.
 
 On Windows with MinGW, link pas_http1 with `-lws2_32` if the header’s pragma doesn’t pull it in.
 
+Run pas_rar examples: `example_list <file.rar>`, `example_extract <file.rar> <entry> [output]`.
+
 Run pas_zip examples: `example_list <file.zip>`, `example_extract <file.zip> <entry> [output]`, `example_create` creates `example.zip`.
 
 Run tests:
@@ -310,6 +324,10 @@ Run tests:
 ./tests/pas_unicode/test_pas_unicode
 ./tests/pas_http1/test_pas_http1
 ./tests/pas_gfx/test_pas_gfx
+./tests/pas_rar/test_open
+./tests/pas_rar/test_find
+./tests/pas_rar/test_extract
+
 ./tests/pas_zip/test_open
 ./tests/pas_zip/test_find
 ./tests/pas_zip/test_extract
