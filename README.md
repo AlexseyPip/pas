@@ -5,6 +5,7 @@ Single-header C libraries in stb style: no malloc, user buffers, OS-only depende
 - **pas_unicode.h** — UTF-8/16/32 encode/decode, conversions, length, C-strings; optional C11 `char16_t`/`char32_t`.
 - **pas_http1.h** — HTTP/1.1 client: GET/POST, URL parsing, timeouts, response parsing; uses OS sockets only (Winsock2 / BSD).
 - **pas_gfx.h** — 2D framebuffer graphics: pixel, line, rect, circle, bitmap (alpha mask); optional stb_truetype text; window frame and button primitives; 32-bit RGBA, no malloc.
+- **pas_truetype.h** — TrueType/OpenType font metrics helper: no malloc, read from memory; cmap (Unicode→glyph), vertical and horizontal metrics, glyph bounding boxes (font units and pixel-space).
 - **pas_zip.h** — ZIP reader (Central Directory): Store always, Deflate via miniz/zlib; optional ZIP creation (Store only); no malloc.
 - **pas_fs.h** — Virtual FS with mount points: FAT32 (read-only), RAM FS (read-write); no malloc.
 - **pas_rar.h** — RAR reader (RAR4 + basic RAR5): no malloc, read from memory; lists entries and extracts only uncompressed files (store, no encryption).
@@ -160,6 +161,25 @@ HTTP/1.1 client: one header, no malloc, OS sockets only (Windows: Winsock2, Unix
 
 ---
 
+# pas_truetype.h
+
+Single-header TrueType/OpenType font **metrics** helper in stb style: **no malloc**, user-provided buffers. Parses a TTF/OTF font from memory, exposes glyph indices and basic layout information, but does not rasterize glyphs (you can feed metrics and bounding boxes into your own rasterizer or `pas_gfx`).
+
+**Usage:** In one TU define `PAS_TRUETYPE_IMPLEMENTATION` then `#include "pas_truetype.h"`.
+
+**API**
+- `int pas_tt_init_font(pas_tt_font_t *out_font, const void *data, size_t size, pas_tt_status *status)` — open a single TTF/OTF font from memory (no TTC), cache table offsets and metrics.
+- `void pas_tt_get_vmetrics(const pas_tt_font_t *font, int *ascent, int *descent, int *line_gap)` — vertical metrics in font units.
+- `int pas_tt_get_glyph_index(const pas_tt_font_t *font, int codepoint)` — map Unicode code point to glyph index (cmap formats 0 and 4).
+- `void pas_tt_get_glyph_hmetrics(const pas_tt_font_t *font, int glyph_index, int *advance_width, int *left_side_bearing)` — horizontal advance and side bearing in font units.
+- `void pas_tt_get_glyph_box(const pas_tt_font_t *font, int glyph_index, int *x0, int *y0, int *x1, int *y1)` — glyph bounding box in font units.
+- `float pas_tt_scale_for_pixel_height(const pas_tt_font_t *font, float pixel_height)` — scale factor from font units to pixels for a given em height.
+- `int pas_tt_get_glyph_bitmap_box(const pas_tt_font_t *font, int glyph_index, float scale_x, float scale_y, int *x0, int *y0, int *x1, int *y1)` — glyph bounding box in pixel space given a scale (integer extents only, no rasterization).
+
+**Errors:** `PAS_TT_OK`, `PAS_TT_E_INVALID`, `PAS_TT_E_RANGE`, `PAS_TT_E_UNSUPPORTED`.
+
+---
+
 # pas_fs.h
 
 Single-header virtual filesystem (stb-style): **no malloc**, user-provided buffers, static mount table.
@@ -267,6 +287,10 @@ Layout: **examples/** and **tests/** are split by library: **pas_unicode/**, **p
 - **tests/pas_rar/test_find.c** — find entry by name.
 - **tests/pas_rar/test_extract.c** — extract store entry, NOSPACE.
 
+**pas_truetype**
+- **examples/pas_truetype/example_metrics.c** — load a TTF/OTF file, print basic metrics and glyph info.
+- **tests/pas_truetype/test_open.c** — invalid buffers/null pointer for `pas_tt_init_font`.
+
 **pas_7z**
 - **examples/pas_7z/example_list.c** — list files in a .7z archive.
 - **examples/pas_7z/example_extract.c** — extract entry (Copy only).
@@ -312,6 +336,9 @@ gcc -o examples/pas_rar/example_extract examples/pas_rar/example_extract.c -I.
 gcc -o tests/pas_rar/test_open          tests/pas_rar/test_open.c          -I.
 gcc -o tests/pas_rar/test_find          tests/pas_rar/test_find.c          -I.
 gcc -o tests/pas_rar/test_extract       tests/pas_rar/test_extract.c       -I.
+
+gcc -o examples/pas_truetype/example_metrics examples/pas_truetype/example_metrics.c -I.
+gcc -o tests/pas_truetype/test_open          tests/pas_truetype/test_open.c          -I.
 
 gcc -o examples/pas_7z/example_list    examples/pas_7z/example_list.c    -I.
 gcc -o examples/pas_7z/example_extract examples/pas_7z/example_extract.c -I.
