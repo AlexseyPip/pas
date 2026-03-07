@@ -97,20 +97,23 @@ static int pas_tcp_wsa_init(void)
 
 int pas_tcp_init(pas_tcp_socket_t *sock)
 {
-    int fd;
     if (!sock)
         return -1;
     if (pas_tcp_wsa_init() != 0)
         return -1;
     sock->_opaque = PAS_TCP_INVALID;
 #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
-    fd = (int)(intptr_t)socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == -1 || fd == (int)(intptr_t)INVALID_SOCKET) return -1;
-    sock->_opaque = PAS_TCP_FROM_FD((SOCKET)(intptr_t)fd);
+    {
+        SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
+        if (s == INVALID_SOCKET) return -1;
+        sock->_opaque = PAS_TCP_FROM_FD(s);
+    }
 #else
-    fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
-    sock->_opaque = PAS_TCP_FROM_FD(fd);
+    {
+        int s = socket(AF_INET, SOCK_STREAM, 0);
+        if (s < 0) return -1;
+        sock->_opaque = PAS_TCP_FROM_FD(s);
+    }
 #endif
     return 0;
 }
