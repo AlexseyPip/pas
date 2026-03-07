@@ -34,7 +34,7 @@ int pas_tcp_init(pas_tcp_socket_t *sock);
 /* Connect to host:port. Returns 0 on success, -1 on failure. */
 int pas_tcp_connect(pas_tcp_socket_t *sock, const char *host, int port);
 
-/* Set send/recv timeout in ms (0 = use default). Returns 0 on success. */
+/* Set send/recv timeout in ms (0 = leave default/blocking). Returns 0 on success. */
 int pas_tcp_set_timeout(pas_tcp_socket_t *sock, int timeout_ms);
 
 /* Send data. Returns bytes sent, or < 0 on error. */
@@ -145,6 +145,8 @@ int pas_tcp_set_timeout(pas_tcp_socket_t *sock, int timeout_ms)
 {
     if (!sock || sock->_opaque == PAS_TCP_INVALID)
         return -1;
+    if (timeout_ms <= 0)
+        return 0; /* 0 = no change */
 #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
     {
         DWORD t = (DWORD)timeout_ms;
