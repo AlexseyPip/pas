@@ -143,8 +143,7 @@ int pas_udp_bind(pas_udp_socket_t *sock, const char *addr_str, int port)
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons((unsigned short)(port & 0xFFFF));
-    if (addr_str[0] == '0' && (addr_str[1] == '\0' || (addr_str[1] == '.' && addr_str[2] == '0')))
-        if (inet_pton(AF_INET, addr_str, &addr.sin_addr) != 1)
+    if (inet_pton(AF_INET, addr_str, &addr.sin_addr) != 1)
         return -1;
     if (bind(PAS_UDP_TO_FD(sock->_opaque), (struct sockaddr *)&addr, sizeof(addr)) != 0)
         return -1;
@@ -155,6 +154,8 @@ int pas_udp_set_timeout(pas_udp_socket_t *sock, int timeout_ms)
 {
     if (!sock || sock->_opaque == PAS_UDP_INVALID)
         return -1;
+    if (timeout_ms <= 0)
+        return 0;
 #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
     {
         DWORD t = (DWORD)timeout_ms;
