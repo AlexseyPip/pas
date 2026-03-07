@@ -55,6 +55,7 @@ void pas_tcp_close(pas_tcp_socket_t *sock);
 #ifdef PAS_TCP_IMPLEMENTATION
 
 #include <string.h>
+#include <stdint.h>
 
 #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
     #ifndef WIN32_LEAN_AND_MEAN
@@ -63,8 +64,10 @@ void pas_tcp_close(pas_tcp_socket_t *sock);
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #pragma comment(lib, "ws2_32.lib")
-    #define PAS_TCP_SOCK_VALID(s) ((s) != INVALID_SOCKET)
-    #define PAS_TCP_ERRNO WSAGetLastError()
+    #define PAS_TCP_INVALID ((void*)(intptr_t)(SOCKET)INVALID_SOCKET)
+    #define PAS_TCP_TO_FD(s) ((SOCKET)(intptr_t)(s))
+    #define PAS_TCP_FROM_FD(fd) ((void*)(intptr_t)(fd))
+    #define PAS_TCP_CLOSE(fd) closesocket(fd)
 #else
     #include <sys/types.h>
     #include <sys/socket.h>
@@ -72,15 +75,11 @@ void pas_tcp_close(pas_tcp_socket_t *sock);
     #include <netdb.h>
     #include <unistd.h>
     #include <errno.h>
-    #define INVALID_SOCKET (-1)
-    #define SOCKET int
-    #define PAS_TCP_SOCK_VALID(s) ((s) >= 0)
-    #define PAS_TCP_ERRNO errno
+    #define PAS_TCP_INVALID ((void*)(intptr_t)-1)
+    #define PAS_TCP_TO_FD(s) ((int)(intptr_t)(s))
+    #define PAS_TCP_FROM_FD(fd) ((void*)(intptr_t)(fd))
+    #define PAS_TCP_CLOSE(fd) close(fd)
 #endif
-
-struct pas_tcp_socket {
-    SOCKET fd;
-};
 
 static int pas_tcp_wsa_init(void)
 {
@@ -96,23 +95,24 @@ static int pas_tcp_wsa_init(void)
     return 0;
 }
 
-pas_tcp_socket_t *pas_tcp_socket_init(void)
+int pas_tcp_init(pas_tcp_socket_t *sock)
 {
-    pas_tcp_socket_t *s;
+    int fd;
+    if (!sock)
+        return -1;
     if (pas_tcp_wsa_init() != 0)
-        return NULL;
-    s = (pas_tcp_socket_t *)((char *)0 + sizeof(pas_tcp_socket_t));
-    (void)s;
-    /* We need to allocate a small struct. Since no malloc, use a static slot. */
-    {
-        static pas_tcp_socket_t g_sock;
-        g_sock.fd = INVALID_SOCKET;
-        s = &g_sock;
-    }
-    s->fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (!PAS_TCP_SOCK_VALID(s->fd))
-        return NULL;
-    return s;
+        return -1;
+    sock->_opaque = PAS_TCP_INVALID;
+#if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
+    fd = (int)(intptr_t)socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == -1 || fd == (int)(intptr_t)INVALID_SOCKET) return -1;
+    sock->_opaque = PAS_TCP_FROM_FD((SOCKET)(intptr_t)fd);
+#else
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    sock->_opaque = PAS_TCP_FROM_FD(fd);
+#endif
+    return 0;
 }
 
 int pas_tcp_connect(pas_tcp_socket_t *sock, const char *host, int port)
