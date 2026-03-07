@@ -162,48 +162,15 @@ static int pas_http2_recv_exact(pas_tcp_socket_t *sock, void *buf, size_t n)
     return 0;
 }
 
-/* Parse :status from HPACK headers. Simple scan for ":status" and digits. */
+/* Parse :status from HPACK. Literal :status (name idx 8) + 3-char value: 0x48/0x08 0x03 "200" */
 static int pas_http2_parse_status(const unsigned char *data, size_t len)
 {
     size_t i;
-    if (len < 10) return 0;
-    /* Look for ":status" (0x08 0x03 ":st" 0x61 "a" 0x74 "t" 0x75 "u" 0x73 "s") in HPACK.
-       Simplified: look for " status: " or similar. Actually HPACK uses 0x08 0x03 ":st" etc.
-       Static :status = index 8 in HPACK appendix. Or literal. Easiest: scan for 3-digit number
-       after we've decoded. We don't fully decode HPACK here - just look for pattern.
-       Common: indexed 8 (:status) then literal "200". So we'd see 0x88 (index 8) 0x03 "200".
-       Or 0x80 0x03 "200" for literal without indexing.
-       Let's scan for ASCII "status" near start, then read digits. */
-    for (i = 0; i + 7 < len; i++) {
-        if (data[i] == ':' && data[i+1] == 's' && data[i+2] == 't' && data[i+3] == 'a' &&
-            data[i+4] == 't' && data[i+5] == 'u' && data[i+6] == 's') {
-            i += 7;
-            while (i < len && (data[i] == ' ' || data[i] == '\t')) i++;
-            if (i + 3 <= len && data[i] >= '0' && data[i] <= '9') {
-                int code = (data[i] - '0') * 100;
-                if (i+1 < len && data[i+1] >= '0' && data[i+1] <= '9')
-                    code += (data[i+1] - '0') * 10;
-                if (i+2 < len && data[i+2] >= '0' && data[i+2] <= '9')
-                    code += (data[i+2] - '0');
-                return code;
-            }
-        }
-    }
-    /* Also check for HPACK indexed :status. Index 8 = :status. Value comes as literal. */
-    for (i = 0; i + 4 < len; i++) {
-        if ((data[i] & 0x80) && (data[i] & 0x7F) == 8) { /* indexed 8 */
-            i++;
-            if (data[i] & 0x80) { /* huffman */
-                /* skip for now */
-            } else {
-                size_t vlen = data[i] & 0x7F;
-                i++;
-                if (i + vlen <= len && vlen == 3 &&
-                    data[i] >= '0' && data[i] <= '9' && data[i+1] >= '0' && data[i+1] <= '9' &&
-                    data[i+2] >= '0' && data[i+2] <= '9') {
-                    return (data[i]-'0')*100 + (data[i+1]-'0')*10 + (data[i+2]-'0');
-                }
-            }
+    for (i = 0; i + 5 <= len; i++) {
+        if ((data[i] == 0x48 || data[i] == 0x08) && (data[i+1] & 0x7F) == 3 &&
+            i + 5 <= len && data[i+2] >= '0' && data[i+2] <= '9' &&
+            data[i+3] >= '0' && data[i+3] <= '9' && data[i+4] >= '0' && data[i+4] <= '9') {
+            return (data[i+2]-'0')*100 + (data[i+3]-'0')*10 + (data[i+4]-'0');
         }
     }
     return 0;
@@ -271,23 +238,37 @@ int pas_http2_get(const char *host, int port, const char *path,
         return PAS_HTTP2_E_CONNECTION;
     }
 
-    /* Read server SETTINGS (and maybe SETTINGS ACK) */
-    if (pas_http2_recv_exact(&sock, frame_buf, 9) != 0) {
-        pas_tcp_close(&sock);
-        if (status) *status = PAS_HTTP2_E_PROTOCOL;
-        return PAS_HTTP2_E_PROTOCOL;
-    }
+    /* Read server SETTINGS and optional SETTINGS ACK */
     {
-        unsigned int plen = pas_http2_read_u24(frame_buf);
-        unsigned char ftype = frame_buf[3];
-        if (ftype == PAS_H2_SETTINGS && plen > 0) {
-            if (pas_http2_recv_exact(&sock, frame_buf, plen) != 0) {
+        int seen_settings = 0;
+        while (!seen_settings) {
+            if (pas_http2_recv_exact(&sock, frame_buf, 9) != 0) {
                 pas_tcp_close(&sock);
                 if (status) *status = PAS_HTTP2_E_PROTOCOL;
                 return PAS_HTTP2_E_PROTOCOL;
             }
-        } else if (ftype == PAS_H2_SETTINGS && plen == 0) {
-            /* empty settings, ok */
+            {
+                unsigned int plen = pas_http2_read_u24(frame_buf);
+                unsigned char ftype = frame_buf[3];
+                unsigned char fflags = frame_buf[4];
+                if (ftype == PAS_H2_GOAWAY) {
+                    pas_tcp_close(&sock);
+                    if (status) *status = PAS_HTTP2_E_PROTOCOL;
+                    return PAS_HTTP2_E_PROTOCOL;
+                }
+                if (ftype == PAS_H2_SETTINGS) {
+                    seen_settings = 1;
+                    if (plen > 0) {
+                        if (plen > sizeof(frame_buf)) plen = (unsigned int)sizeof(frame_buf);
+                        if (pas_http2_recv_exact(&sock, frame_buf, plen) != 0) {
+                            pas_tcp_close(&sock);
+                            if (status) *status = PAS_HTTP2_E_PROTOCOL;
+                            return PAS_HTTP2_E_PROTOCOL;
+                        }
+                    }
+                    /* if ACK (fflags & 1), server acked our SETTINGS; no more settings expected */
+                }
+            }
         }
     }
 
