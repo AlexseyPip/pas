@@ -4,6 +4,9 @@ Single-header C libraries in stb style: no malloc, user buffers, OS-only depende
 
 - **pas_unicode.h** — UTF-8/16/32 encode/decode, conversions, length, C-strings; optional C11 `char16_t`/`char32_t`.
 - **pas_http1.h** — HTTP/1.1 client: GET/POST, URL parsing, timeouts, response parsing; uses OS sockets only (Winsock2 / BSD).
+- **pas_tcp.h** — TCP socket wrapper: init, connect, send, recv, close; no malloc, OS sockets.
+- **pas_udp.h** — UDP socket wrapper: init, bind, sendto, recvfrom, close; no malloc, OS sockets.
+- **pas_http2.h** — HTTP/2 client (h2c): GET via pas_tcp; connection preface, SETTINGS, HEADERS/DATA; minimal HPACK.
 - **pas_gfx.h** — 2D framebuffer graphics: pixel, line, rect, circle, bitmap (alpha mask); optional stb_truetype text; window frame and button primitives; 32-bit RGBA, no malloc.
 - **pas_truetype.h** — TrueType/OpenType font metrics helper: no malloc, read from memory; cmap (Unicode→glyph), vertical and horizontal metrics, glyph bounding boxes (font units and pixel-space).
 - **pas_zip.h** — ZIP reader (Central Directory): Store always, Deflate via miniz/zlib; optional ZIP creation (Store only); no malloc.
@@ -140,6 +143,56 @@ HTTP/1.1 client: one header, no malloc, OS sockets only (Windows: Winsock2, Unix
 **Structure:** `pas_http_response_t` has `status_code`, `headers` / `headers_len`, `body` / `body_len` (all pointing into your buffer).
 
 **Errors:** `PAS_HTTP_OK`, `PAS_HTTP_E_INVALID_URL`, `PAS_HTTP_E_CONNECTION`, `PAS_HTTP_E_TIMEOUT`, `PAS_HTTP_E_NOSPACE` (buffer too small; response is still parsed up to buffer size).
+
+---
+
+# pas_tcp.h
+
+TCP socket wrapper: no malloc, user allocates `pas_tcp_socket_t`. Uses OS sockets (Winsock2 / BSD).
+
+**Usage:** In one TU define `PAS_TCP_IMPLEMENTATION` then `#include "pas_tcp.h"`. Link with `-lws2_32` on Windows.
+
+**API**
+- `int pas_tcp_init(pas_tcp_socket_t *sock)` — create TCP socket.
+- `int pas_tcp_connect(sock, host, port)` — connect to host:port.
+- `int pas_tcp_set_timeout(sock, timeout_ms)` — send/recv timeout (0 = default).
+- `int pas_tcp_send(sock, data, size)` — send; returns bytes sent or < 0.
+- `int pas_tcp_recv(sock, buffer, size)` — receive; returns bytes received, 0 on peer close, < 0 on error.
+- `void pas_tcp_close(sock)` — close socket.
+
+---
+
+# pas_udp.h
+
+UDP socket wrapper: no malloc, user allocates `pas_udp_socket_t`. Uses OS sockets (Winsock2 / BSD).
+
+**Usage:** In one TU define `PAS_UDP_IMPLEMENTATION` then `#include "pas_udp.h"`. Link with `-lws2_32` on Windows.
+
+**API**
+- `int pas_udp_init(pas_udp_socket_t *sock)` — create UDP socket.
+- `int pas_udp_bind(sock, addr_str, port)` — optional bind (e.g. `"0.0.0.0"`, 0 for any port).
+- `int pas_udp_set_timeout(sock, timeout_ms)` — recv timeout.
+- `int pas_udp_sendto(sock, data, size, host, port)` — send datagram.
+- `int pas_udp_recvfrom(sock, buffer, size, &peer_addr)` — receive; optionally fills peer for reply.
+- `int pas_udp_sendto_addr(sock, data, size, &addr)` — send to pre-resolved address.
+- `void pas_udp_close(sock)` — close socket.
+
+---
+
+# pas_http2.h
+
+HTTP/2 client (h2c, cleartext only). Uses `pas_tcp` for transport. No malloc; user provides response buffer.
+
+**Usage:** Define `PAS_TCP_IMPLEMENTATION` and `PAS_HTTP2_IMPLEMENTATION`, include `pas_tcp.h` then `pas_http2.h`. Link with `-lws2_32` on Windows.
+
+**API**
+- `int pas_http2_get(host, port, path, response_buffer, buffer_size, timeout_ms, &out_response, &status)` — h2c GET request.
+
+**Structure:** `pas_http2_response_t` has `status_code`, `headers` / `headers_len` (raw HPACK), `body` / `body_len` (all pointing into buffer).
+
+**Errors:** `PAS_HTTP2_OK`, `PAS_HTTP2_E_INVALID`, `PAS_HTTP2_E_CONNECTION`, `PAS_HTTP2_E_TIMEOUT`, `PAS_HTTP2_E_NOSPACE`, `PAS_HTTP2_E_PROTOCOL`.
+
+**Note:** Supports GET only; minimal HPACK (static table + literal for :authority). Servers must speak h2c (HTTP/2 cleartext).
 
 ---
 
@@ -280,6 +333,11 @@ Layout: **examples/** and **tests/** are split by library: **pas_unicode/**, **p
 - **examples/pas_http1/example_get.c** — GET request.
 - **tests/pas_http1/test_pas_http1.c** — invalid URL, null buffer, optional live GET.
 
+**pas_tcp** / **pas_udp** / **pas_http2**
+- **tests/pas_tcp/test_init.c** — init and close.
+- **tests/pas_udp/test_init.c** — init and close.
+- Link with `-lws2_32` on Windows for TCP/UDP/HTTP2.
+
 **pas_rar**
 - **examples/pas_rar/example_list.c** — list files in a RAR archive.
 - **examples/pas_rar/example_extract.c** — extract entry (store/uncompressed only).
@@ -331,6 +389,9 @@ gcc -o tests/pas_unicode/test_pas_unicode tests/pas_unicode/test_pas_unicode.c -
 gcc -o examples/pas_http1/example_get examples/pas_http1/example_get.c -I.
 gcc -o tests/pas_http1/test_pas_http1 tests/pas_http1/test_pas_http1.c -I.
 
+gcc -o tests/pas_tcp/test_init  tests/pas_tcp/test_init.c  -I. -lws2_32
+gcc -o tests/pas_udp/test_init  tests/pas_udp/test_init.c  -I. -lws2_32
+
 gcc -o examples/pas_rar/example_list    examples/pas_rar/example_list.c    -I.
 gcc -o examples/pas_rar/example_extract examples/pas_rar/example_extract.c -I.
 gcc -o tests/pas_rar/test_open          tests/pas_rar/test_open.c          -I.
@@ -381,6 +442,8 @@ Run tests:
 ```bash
 ./tests/pas_unicode/test_pas_unicode
 ./tests/pas_http1/test_pas_http1
+./tests/pas_tcp/test_init
+./tests/pas_udp/test_init
 ./tests/pas_gfx/test_pas_gfx
 ./tests/pas_rar/test_open
 ./tests/pas_rar/test_find
