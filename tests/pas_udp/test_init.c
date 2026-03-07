@@ -15,6 +15,7 @@ int main(void) {
     pas_udp_socket_t sock;
     failed = assertions = 0;
     ASSERT(pas_udp_init(&sock) == 0);
+    ASSERT(pas_udp_bind(&sock, "127.0.0.1", 0) == 0);
     pas_udp_close(&sock);
     if (failed) { fprintf(stderr, "%d/%d failed\n", failed, assertions); return 1; }
     printf("All %d assertions passed.\n", assertions);
