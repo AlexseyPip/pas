@@ -54,6 +54,7 @@ void pas_tcp_close(pas_tcp_socket_t *sock);
 
 #ifdef PAS_TCP_IMPLEMENTATION
 
+#include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 
@@ -124,7 +125,7 @@ int pas_tcp_connect(pas_tcp_socket_t *sock, const char *host, int port)
     char port_str[8];
     int r;
 
-    if (!sock || !host || port <= 0 || port > 65535)
+    if (!sock || sock->_opaque == PAS_TCP_INVALID || !host || port <= 0 || port > 65535)
         return -1;
 
     snprintf(port_str, sizeof(port_str), "%d", port);
@@ -135,21 +136,21 @@ int pas_tcp_connect(pas_tcp_socket_t *sock, const char *host, int port)
     if (getaddrinfo(host, port_str, &hints, &res) != 0)
         return -1;
 
-    r = connect(sock->fd, res->ai_addr, (int)res->ai_addrlen);
+    r = connect(PAS_TCP_TO_FD(sock->_opaque), res->ai_addr, (int)res->ai_addrlen);
     freeaddrinfo(res);
     return (r == 0) ? 0 : -1;
 }
 
 int pas_tcp_set_timeout(pas_tcp_socket_t *sock, int timeout_ms)
 {
-    if (!sock || !PAS_TCP_SOCK_VALID(sock->fd))
+    if (!sock || sock->_opaque == PAS_TCP_INVALID)
         return -1;
 #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
     {
         DWORD t = (DWORD)timeout_ms;
-        if (setsockopt(sock->fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&t, sizeof(t)) != 0)
+        if (setsockopt(PAS_TCP_TO_FD(sock->_opaque), SOL_SOCKET, SO_RCVTIMEO, (const char *)&t, sizeof(t)) != 0)
             return -1;
-        if (setsockopt(sock->fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&t, sizeof(t)) != 0)
+        if (setsockopt(PAS_TCP_TO_FD(sock->_opaque), SOL_SOCKET, SO_SNDTIMEO, (const char *)&t, sizeof(t)) != 0)
             return -1;
     }
 #else
@@ -157,9 +158,9 @@ int pas_tcp_set_timeout(pas_tcp_socket_t *sock, int timeout_ms)
         struct timeval tv;
         tv.tv_sec = timeout_ms / 1000;
         tv.tv_usec = (timeout_ms % 1000) * 1000;
-        if (setsockopt(sock->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0)
+        if (setsockopt(PAS_TCP_TO_FD(sock->_opaque), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0)
             return -1;
-        if (setsockopt(sock->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0)
+        if (setsockopt(PAS_TCP_TO_FD(sock->_opaque), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0)
             return -1;
     }
 #endif
@@ -168,39 +169,34 @@ int pas_tcp_set_timeout(pas_tcp_socket_t *sock, int timeout_ms)
 
 int pas_tcp_send(pas_tcp_socket_t *sock, const void *data, size_t size)
 {
-    if (!sock || !PAS_TCP_SOCK_VALID(sock->fd) || !data)
+    if (!sock || sock->_opaque == PAS_TCP_INVALID || !data)
         return -1;
 #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
-    return send(sock->fd, (const char *)data, (int)size, 0);
+    return (int)send(PAS_TCP_TO_FD(sock->_opaque), (const char *)data, (int)size, 0);
 #else
-    ssize_t n = send(sock->fd, data, size, 0);
+    ssize_t n = send(PAS_TCP_TO_FD(sock->_opaque), data, size, 0);
     return (int)n;
 #endif
 }
 
 int pas_tcp_recv(pas_tcp_socket_t *sock, void *buffer, size_t size)
 {
-    if (!sock || !PAS_TCP_SOCK_VALID(sock->fd) || !buffer)
+    if (!sock || sock->_opaque == PAS_TCP_INVALID || !buffer)
         return -1;
 #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
-    return recv(sock->fd, (char *)buffer, (int)size, 0);
+    return recv(PAS_TCP_TO_FD(sock->_opaque), (char *)buffer, (int)size, 0);
 #else
-    ssize_t n = recv(sock->fd, buffer, size, 0);
+    ssize_t n = recv(PAS_TCP_TO_FD(sock->_opaque), buffer, size, 0);
     return (int)n;
 #endif
 }
 
 void pas_tcp_close(pas_tcp_socket_t *sock)
 {
-    if (!sock) return;
-    if (PAS_TCP_SOCK_VALID(sock->fd)) {
-#if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
-        closesocket(sock->fd);
-#else
-        close(sock->fd);
-#endif
-        sock->fd = INVALID_SOCKET;
-    }
+    if (!sock || sock->_opaque == PAS_TCP_INVALID)
+        return;
+    PAS_TCP_CLOSE(PAS_TCP_TO_FD(sock->_opaque));
+    sock->_opaque = PAS_TCP_INVALID;
 }
 
 #endif /* PAS_TCP_IMPLEMENTATION */
